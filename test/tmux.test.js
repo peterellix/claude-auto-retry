@@ -9,9 +9,9 @@ describe('buildCaptureArgs', () => {
   });
 });
 describe('buildSendKeysArgs', () => {
-  it('builds correct args with Enter', () => {
+  it('builds correct args for literal text', () => {
     assert.deepEqual(buildSendKeysArgs('%3', 'hello world'),
-      ['send-keys', '-t', '%3', 'hello world', 'Enter']);
+      ['send-keys', '-l', '-t', '%3', 'hello world']);
   });
 });
 describe('buildSendEnterArgs', () => {

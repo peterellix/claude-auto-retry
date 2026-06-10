@@ -42,9 +42,41 @@ describe('processOneTick', () => {
     assert.equal(await processOneTick(s, t, '%0', DEFAULT_CONFIG, () => true), 'retried');
     assert.equal(t._sent.length, 1);
     assert.equal(s.attempts, 1);
+    assert.equal(s.retrySentForCurrentLimit, true);
     // Should stay in 'waiting' with a cooldown to let Claude process
     assert.equal(s.status, 'waiting');
     assert.ok(s.waitUntil > Date.now());
+  });
+  it('does not resend retry while stale rate-limit text remains visible', async () => {
+    const t = mockTmux('5-hour limit reached - resets 3pm (UTC)');
+    const s = createMonitorState();
+    s.waitUntil = Date.now() - 1000;
+    s.status = 'waiting';
+    s.retrySentForCurrentLimit = true;
+    s.attempts = 1;
+    assert.equal(await processOneTick(s, t, '%0', DEFAULT_CONFIG, () => true), 'post-retry-waiting');
+    assert.equal(t._sent.length, 0);
+    assert.equal(s.attempts, 1);
+    assert.equal(s.status, 'waiting');
+    assert.ok(s.waitUntil > Date.now());
+  });
+  it('ignores stale rate-limit text while Claude is visibly thinking', async () => {
+    const t = mockTmux('5-hour limit reached - resets 3pm (UTC)\n· Herding… (3m · thinking with xhigh effort)');
+    const s = createMonitorState();
+    assert.equal(await processOneTick(s, t, '%0', DEFAULT_CONFIG, () => true), 'monitoring');
+    assert.equal(t._sent.length, 0);
+  });
+  it('clears waiting state when Claude is visibly thinking after retry', async () => {
+    const t = mockTmux('5-hour limit reached - resets 3pm (UTC)\n· Herding… (3m · thinking with xhigh effort)');
+    const s = createMonitorState();
+    s.waitUntil = Date.now() - 1000;
+    s.status = 'waiting';
+    s.retrySentForCurrentLimit = true;
+    s.attempts = 1;
+    assert.equal(await processOneTick(s, t, '%0', DEFAULT_CONFIG, () => true), 'user-continued');
+    assert.equal(s.status, 'monitoring');
+    assert.equal(s.attempts, 0);
+    assert.equal(s.retrySentForCurrentLimit, false);
   });
   it('detects multi-line TUI rate limit', async () => {
     const t = mockTmux('⚠ You\'ve hit your limit\n· resets 3pm (UTC)');

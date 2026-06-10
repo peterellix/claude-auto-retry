@@ -7,7 +7,7 @@ import { createLogger } from './logger.js';
 const DEFAULT_FOREGROUND_COMMANDS = ['node', 'claude', 'npx', 'tsx', 'bun', 'deno'];
 
 export function createMonitorState() {
-  return { status: 'monitoring', waitUntil: 0, attempts: 0, lastRateLimitMessage: null };
+  return { status: 'monitoring', waitUntil: 0, attempts: 0, lastRateLimitMessage: null, retrySentForCurrentLimit: false };
 }
 
 function isRateLimitOptionsPrompt(text) {
@@ -15,6 +15,12 @@ function isRateLimitOptionsPrompt(text) {
     && /What do you want to do\?/i.test(text)
     && /Stop and wait for limit to reset/i.test(text)
     && /Enter to confirm/i.test(text);
+}
+
+function isClaudeBusy(text) {
+  return /\bHerding\b/i.test(text)
+    || /still thinking/i.test(text)
+    || /thinking (?:with|more|hard|.*effort)/i.test(text);
 }
 
 export async function processOneTick(state, tmuxAdapter, pane, config, isAlive) {
@@ -37,11 +43,21 @@ export async function processOneTick(state, tmuxAdapter, pane, config, isAlive) 
     if (Date.now() < state.waitUntil) return 'waiting';
     if (!isAlive()) return 'exit';
 
+    if (isClaudeBusy(stripped)) {
+      state.status = 'monitoring'; state.attempts = 0; state.retrySentForCurrentLimit = false;
+      return 'user-continued';
+    }
+
     // Always check if rate limit cleared FIRST — even when maxRetries
     // exhausted, the user (or time passing) may have resolved it.
     if (!isRateLimited(stripped, config.customPatterns)) {
-      state.status = 'monitoring'; state.attempts = 0;
+      state.status = 'monitoring'; state.attempts = 0; state.retrySentForCurrentLimit = false;
       return 'user-continued';
+    }
+
+    if (state.retrySentForCurrentLimit) {
+      state.waitUntil = Date.now() + (config.pollIntervalSeconds * 1000 * 12);
+      return 'post-retry-waiting';
     }
 
     if (state.attempts >= config.maxRetries) {
@@ -70,12 +86,13 @@ export async function processOneTick(state, tmuxAdapter, pane, config, isAlive) 
     // Increment attempts and set cooldown BEFORE sendKeys so that a failure
     // (e.g. pane destroyed) still consumes a retry and avoids tight-loop errors.
     state.attempts++;
+    state.retrySentForCurrentLimit = true;
     state.waitUntil = Date.now() + 30_000;
     await tmuxAdapter.sendKeys(pane, config.retryMessage);
     return 'retried';
   }
 
-  if (isRateLimited(stripped, config.customPatterns)) {
+  if (!isClaudeBusy(stripped) && isRateLimited(stripped, config.customPatterns)) {
     const message = findRateLimitMessage(stripped, config.customPatterns);
     state.lastRateLimitMessage = message;
     const parsed = message ? parseResetTime(message) : null;
@@ -112,6 +129,7 @@ export async function startMonitor(pane, pid) {
       }
       if (result === 'confirmed-rate-limit-options') await logger.info('Confirmed Claude rate-limit wait option.');
       if (result === 'retried') await logger.info(`Sent retry message (attempt ${state.attempts})`);
+      if (result === 'post-retry-waiting') await logger.info('Retry message already sent for current rate-limit event; waiting for pane to clear stale limit text.');
       if (result === 'user-continued') await logger.info('User already continued. Attempt counter reset.');
       if (result === 'max-retries') await logger.warn(`Max retries (${config.maxRetries}) reached. Monitor still active but will not send further retries until rate limit clears.`);
       if (result === 'skipped-not-claude') await logger.warn(`Foreground is "${state._lastForeground}", not Claude. Skipping send-keys. (Add to foregroundCommands in ~/.claude-auto-retry.json if this is wrong)`);
