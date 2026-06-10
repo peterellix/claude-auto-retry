@@ -6,9 +6,11 @@ import { DEFAULT_CONFIG } from '../src/config.js';
 function mockTmux(paneContent = '', paneCommand = 'node', claudeForeground = true) {
   const t = {
     _sent: [],
+    _entered: 0,
     capturePane: async () => paneContent,
     getPaneCommand: async () => paneCommand,
     sendKeys: async (_p, text) => { t._sent.push(text); },
+    sendEnter: async () => { t._entered++; },
     isClaudeForeground: async () => claudeForeground,
   };
   return t;
@@ -48,6 +50,28 @@ describe('processOneTick', () => {
     const t = mockTmux('⚠ You\'ve hit your limit\n· resets 3pm (UTC)');
     const s = createMonitorState();
     assert.equal(await processOneTick(s, t, '%0', DEFAULT_CONFIG, () => true), 'waiting');
+    assert.ok(s.waitUntil > Date.now());
+  });
+  it('auto-confirms Claude Code rate-limit options menu', async () => {
+    const text = [
+      '⎿  You\'ve hit your session limit · resets 12:10am (Europe/Dublin)',
+      '',
+      '❯ /rate-limit-options',
+      '',
+      'What do you want to do?',
+      '',
+      '❯ 1. Stop and wait for limit to reset',
+      '  2. Upgrade your plan',
+      '  3. Upgrade to Team plan',
+      '',
+      'Enter to confirm · Esc to cancel',
+    ].join('\n');
+    const t = mockTmux(text);
+    const s = createMonitorState();
+    assert.equal(await processOneTick(s, t, '%0', DEFAULT_CONFIG, () => true), 'confirmed-rate-limit-options');
+    assert.equal(t._entered, 1);
+    assert.equal(t._sent.length, 0);
+    assert.equal(s.status, 'waiting');
     assert.ok(s.waitUntil > Date.now());
   });
   it('retries when Claude process is in foreground (fixes macOS zsh issue)', async () => {
