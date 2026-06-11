@@ -7,7 +7,14 @@ import { createLogger } from './logger.js';
 const DEFAULT_FOREGROUND_COMMANDS = ['node', 'claude', 'npx', 'tsx', 'bun', 'deno'];
 
 export function createMonitorState() {
-  return { status: 'monitoring', waitUntil: 0, attempts: 0, lastRateLimitMessage: null, retrySentForCurrentLimit: false };
+  return {
+    status: 'monitoring',
+    waitUntil: 0,
+    attempts: 0,
+    lastRateLimitMessage: null,
+    retrySentForCurrentLimit: false,
+    rateLimitOptionsConfirmed: false,
+  };
 }
 
 function isRateLimitOptionsPrompt(text) {
@@ -29,12 +36,13 @@ export async function processOneTick(state, tmuxAdapter, pane, config, isAlive) 
   const raw = await tmuxAdapter.capturePane(pane, 20);
   const stripped = stripAnsi(raw);
 
-  if (state.status === 'monitoring' && isRateLimitOptionsPrompt(stripped)) {
+  if (!state.rateLimitOptionsConfirmed && isRateLimitOptionsPrompt(stripped)) {
     const message = findRateLimitMessage(stripped, config.customPatterns);
     const parsed = message ? parseResetTime(message) : null;
     state.lastRateLimitMessage = message;
     state.waitUntil = Date.now() + calculateWaitMs(parsed, config.marginSeconds, config.fallbackWaitHours);
     state.status = 'waiting';
+    state.rateLimitOptionsConfirmed = true;
     await tmuxAdapter.sendEnter(pane);
     return 'confirmed-rate-limit-options';
   }
@@ -44,14 +52,14 @@ export async function processOneTick(state, tmuxAdapter, pane, config, isAlive) 
     if (!isAlive()) return 'exit';
 
     if (isClaudeBusy(stripped)) {
-      state.status = 'monitoring'; state.attempts = 0; state.retrySentForCurrentLimit = false;
+      state.status = 'monitoring'; state.attempts = 0; state.retrySentForCurrentLimit = false; state.rateLimitOptionsConfirmed = false;
       return 'user-continued';
     }
 
     // Always check if rate limit cleared FIRST — even when maxRetries
     // exhausted, the user (or time passing) may have resolved it.
     if (!isRateLimited(stripped, config.customPatterns)) {
-      state.status = 'monitoring'; state.attempts = 0; state.retrySentForCurrentLimit = false;
+      state.status = 'monitoring'; state.attempts = 0; state.retrySentForCurrentLimit = false; state.rateLimitOptionsConfirmed = false;
       return 'user-continued';
     }
 
@@ -98,6 +106,7 @@ export async function processOneTick(state, tmuxAdapter, pane, config, isAlive) 
     const parsed = message ? parseResetTime(message) : null;
     state.waitUntil = Date.now() + calculateWaitMs(parsed, config.marginSeconds, config.fallbackWaitHours);
     state.status = 'waiting';
+    state.rateLimitOptionsConfirmed = false;
     return 'waiting';
   }
 

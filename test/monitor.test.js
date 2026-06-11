@@ -106,6 +106,29 @@ describe('processOneTick', () => {
     assert.equal(s.status, 'waiting');
     assert.ok(s.waitUntil > Date.now());
   });
+  it('auto-confirms rate-limit options menu even after entering waiting mode', async () => {
+    const text = [
+      '⎿  You\'ve hit your session limit · resets 5:10am (Europe/Dublin)',
+      '',
+      '❯ /rate-limit-options',
+      '',
+      'What do you want to do?',
+      '',
+      '❯ 1. Stop and wait for limit to reset',
+      '  2. Upgrade your plan',
+      '  3. Upgrade to Team plan',
+      '',
+      'Enter to confirm · Esc to cancel',
+    ].join('\n');
+    const t = mockTmux(text);
+    const s = createMonitorState();
+    s.status = 'waiting';
+    s.waitUntil = Date.now() + 10_000;
+    assert.equal(await processOneTick(s, t, '%0', DEFAULT_CONFIG, () => true), 'confirmed-rate-limit-options');
+    assert.equal(t._entered, 1);
+    assert.equal(s.status, 'waiting');
+    assert.equal(s.rateLimitOptionsConfirmed, true);
+  });
   it('retries when Claude process is in foreground (fixes macOS zsh issue)', async () => {
     const t = mockTmux('5-hour limit reached - resets 3pm (UTC)', 'zsh', true);
     const s = createMonitorState();
