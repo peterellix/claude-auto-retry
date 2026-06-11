@@ -1,7 +1,7 @@
 {
   "name": "claude-auto-retry",
-  "version": "0.2.2",
-  "description": "Automatically retry Claude Code sessions when hitting Anthropic subscription rate limits",
+  "version": "0.3.0-peter.1",
+  "description": "Automatically retry Claude Code sessions when hitting Anthropic subscription rate limits (peterellix fork: rate-limit-options menu handling + no exec-bash keepalive)",
   "type": "module",
   "bin": {
     "claude-auto-retry": "./bin/cli.js"

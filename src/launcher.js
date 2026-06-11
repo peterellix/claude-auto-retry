@@ -133,7 +133,10 @@ async function createTmuxSession(args) {
   // Build the command to run inside tmux
   const escapedLauncher = shellEscape(launcherPath);
   const escapedArgs = args.map(a => shellEscape(a)).join(' ');
-  const innerCmd = `CLAUDE_AUTO_RETRY_ACTIVE=1 node ${escapedLauncher} ${escapedArgs}; exec bash`;
+  // NOTE: no `; exec bash` keepalive — on macOS it drops you into /bin/bash 3.2
+  // after quitting Claude. The keepalive doesn't power auto-retry (that works via
+  // sendKeys while Claude is still foreground), so dropping it is safe.
+  const innerCmd = `CLAUDE_AUTO_RETRY_ACTIVE=1 node ${escapedLauncher} ${escapedArgs}`;
 
   // Build env propagation args
   // tmux -e flag requires tmux >= 3.0; for older versions, prefix env exports in the command
